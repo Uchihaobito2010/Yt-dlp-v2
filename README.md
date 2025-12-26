@@ -1,11 +1,29 @@
 # Instagram Media Downloader API
 
-A Vercel serverless API to download Instagram posts, reels, stories, and all media using yt-dlp. *by Paras chourasiya TG - @Aotpy*
+📱 **API to download Instagram posts, reels, stories, and media**
 
-## Setup & Deployment
+**Developer:** Paras Chourasiya  
+**Telegram:** [@Aotpy](https://t.me/Aotpy)  
+**Contact:** For issues or questions, message on Telegram: @Aotpy
 
-1. **Clone and install dependencies:**
+## Features
+- ✅ Download Instagram posts, reels, stories
+- ✅ Multiple quality options (best/worst)
+- ✅ Temporary file storage (5 minutes)
+- ✅ Automatic cleanup
+- ✅ CORS enabled
+- ✅ Error handling with helpful messages
+
+## Quick Start
+
+### 1. Clone & Deploy
 ```bash
-git clone <your-repo>
+# Clone repository
+git clone https://github.com/yourusername/instagram-dl-api.git
 cd instagram-dl-api
+
+# Install dependencies
 npm install
+
+# Deploy to Vercel
+vercel
