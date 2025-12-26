@@ -1,7 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-// Developer information
 const DEVELOPER_INFO = {
   author: "Paras Chourasiya",
   telegram: "@Aotpy",
@@ -12,24 +11,27 @@ module.exports = async (req, res) => {
   // Add developer headers
   res.setHeader('X-Developer', DEVELOPER_INFO.author);
   res.setHeader('X-Contact', DEVELOPER_INFO.telegram);
+  res.setHeader('X-Service', 'Instagram Downloader by Paras Chourasiya (@Aotpy)');
   
-  const { path: filePath, name } = req.query;
+  const { file, temp } = req.query;
   
-  if (!filePath || !name) {
+  if (!file || !temp) {
     return res.status(400).json({
-      error: 'File path and name are required',
+      error: 'Missing parameters',
       developer: DEVELOPER_INFO.author,
       contact: DEVELOPER_INFO.telegram,
-      usage: '/api/serve?path=FILE_PATH&name=FILENAME'
+      usage: '/api/serve?file=FILENAME&temp=TEMP_DIR_ID',
+      example: '/api/serve?file=video.mp4&temp=insta_123456789'
     });
   }
   
   try {
-    // Security check - ensure path is within /tmp
-    const decodedPath = decodeURIComponent(filePath);
-    const decodedName = decodeURIComponent(name);
+    const fileName = decodeURIComponent(file);
+    const tempDir = `/tmp/${decodeURIComponent(temp)}`;
+    const filePath = path.join(tempDir, fileName);
     
-    if (!decodedPath.startsWith('/tmp/') || !decodedPath.includes('insta_')) {
+    // Security check
+    if (!tempDir.startsWith('/tmp/insta_') || !filePath.startsWith(tempDir)) {
       return res.status(403).json({
         error: 'Access denied',
         developer: DEVELOPER_INFO.author,
@@ -39,78 +41,73 @@ module.exports = async (req, res) => {
     
     // Check if file exists
     try {
-      await fs.access(decodedPath);
+      await fs.access(filePath);
     } catch {
       return res.status(404).json({
-        error: 'File not found or expired',
-        note: 'Download links expire after 5 minutes',
-        developer: DEVELOPER_INFO.author,
-        contact: DEVELOPER_INFO.telegram
-      });
-    }
-    
-    const stats = await fs.stat(decodedPath);
-    
-    // Check file size (Vercel limit: 50MB)
-    if (stats.size > 50 * 1024 * 1024) {
-      return res.status(413).json({
-        error: 'File too large (max 50MB)',
-        size: `${(stats.size / (1024 * 1024)).toFixed(2)} MB`,
+        error: 'File expired or not found',
         developer: DEVELOPER_INFO.author,
         contact: DEVELOPER_INFO.telegram,
-        suggestion: 'Try downloading lower quality version'
+        note: 'Download links expire after 5 minutes',
+        support: 'Contact @Aotpy on Telegram if issue persists'
       });
     }
     
-    // Set appropriate headers
-    const ext = path.extname(decodedName).toLowerCase();
+    const stats = await fs.stat(filePath);
+    
+    // Check file size (Vercel limit)
+    if (stats.size > 45 * 1024 * 1024) { // 45MB for safety
+      return res.status(413).json({
+        error: 'File too large',
+        developer: DEVELOPER_INFO.author,
+        contact: DEVELOPER_INFO.telegram,
+        max_size: '45MB',
+        file_size: `${(stats.size / (1024 * 1024)).toFixed(2)}MB`,
+        suggestion: 'Try lower quality or contact @Aotpy'
+      });
+    }
+    
+    // Set content type
+    const ext = path.extname(fileName).toLowerCase();
     const contentType = getContentType(ext);
     
+    // Set headers
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${decodedName}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('Content-Length', stats.size);
-    res.setHeader('X-File-Name', decodedName);
+    res.setHeader('X-File-Name', fileName);
     res.setHeader('X-File-Size', stats.size);
     res.setHeader('X-Developer', DEVELOPER_INFO.author);
     res.setHeader('X-Contact', DEVELOPER_INFO.telegram);
+    res.setHeader('X-Expires', '5 minutes from download');
     
-    // Stream the file
-    const fileStream = await fs.readFile(decodedPath);
-    res.send(fileStream);
+    // Send file
+    const fileBuffer = await fs.readFile(filePath);
+    res.send(fileBuffer);
     
-    // Clean up file after sending (optional)
-    setTimeout(async () => {
-      try {
-        await fs.unlink(decodedPath);
-        console.log(`Cleaned up: ${decodedPath}`);
-      } catch (cleanupError) {
-        console.error('Cleanup error:', cleanupError);
-      }
-    }, 1000);
+    console.log(`📤 Served: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
     
   } catch (error) {
-    console.error('Serve error:', error);
+    console.error('Serve error:', error.message);
     
     return res.status(500).json({
       error: 'Failed to serve file',
       developer: DEVELOPER_INFO.author,
       contact: DEVELOPER_INFO.telegram,
-      details: error.message
+      details: error.message,
+      support: 'Contact @Aotpy on Telegram immediately'
     });
   }
 };
 
 function getContentType(ext) {
-  const contentTypes = {
+  const types = {
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
     '.mkv': 'video/x-matroska',
-    '.mov': 'video/quicktime',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.png': 'image/png',
     '.webp': 'image/webp'
   };
-  
-  return contentTypes[ext] || 'application/octet-stream';
-                                  }
+  return types[ext] || 'application/octet-stream';
+        }
