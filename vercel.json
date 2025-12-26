@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/*.js": {
-      "maxDuration": 30
+      "maxDuration": 30,
+      "memory": 1024
     }
   },
   "rewrites": [
@@ -23,8 +24,12 @@
           "value": "Telegram: @Aotpy"
         },
         {
+          "key": "X-Service",
+          "value": "Instagram Downloader API"
+        },
+        {
           "key": "X-Warning",
-          "value": "For personal use only. Contact @Aotpy for issues."
+          "value": "Personal use only. Contact @Aotpy for issues."
         }
       ]
     }
