@@ -6,8 +6,9 @@
     }
   },
   "rewrites": [
-    { "source": "/", "destination": "/api/health" },
+    { "source": "/", "destination": "/api/simple-download" },
     { "source": "/api/download", "destination": "/api/download.js" },
+    { "source": "/api/simple", "destination": "/api/simple-download.js" },
     { "source": "/api/health", "destination": "/api/health.js" },
     { "source": "/api/serve", "destination": "/api/serve.js" }
   ],
@@ -26,10 +27,6 @@
         {
           "key": "X-Service",
           "value": "Instagram Downloader API"
-        },
-        {
-          "key": "X-Warning",
-          "value": "Personal use only. Contact @Aotpy for issues."
         }
       ]
     }
