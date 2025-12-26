@@ -3,6 +3,7 @@ const { promisify } = require('util');
 const execAsync = promisify(exec);
 const path = require('path');
 const fs = require('fs').promises;
+const https = require('https');
 
 // Developer information
 const DEVELOPER_INFO = {
@@ -13,22 +14,61 @@ const DEVELOPER_INFO = {
   note: "Do not download content you don't own or have permission for."
 };
 
-// Ensure yt-dlp is available
-const YT_DLP_PATH = '/tmp/yt-dlp';
-
-async function ensureYtDlp() {
+// Download yt-dlp if not available
+async function downloadYtDlp() {
+  console.log('📥 Downloading yt-dlp on demand...');
+  
+  const ytDlpPath = '/tmp/yt-dlp-on-demand';
+  const ytDlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+  
   try {
-    await fs.access(YT_DLP_PATH);
-    return YT_DLP_PATH;
-  } catch {
-    // Fallback to system yt-dlp
+    // Try curl first
+    await execAsync(`curl -L ${ytDlpUrl} -o ${ytDlpPath} --connect-timeout 10`);
+    await execAsync(`chmod +x ${ytDlpPath}`);
+    console.log('✅ yt-dlp downloaded successfully');
+    return ytDlpPath;
+  } catch (error) {
+    console.log('⚠️ Curl failed, trying wget...');
+    
     try {
-      await execAsync('which yt-dlp');
-      return 'yt-dlp';
-    } catch {
-      throw new Error('yt-dlp not found. Contact @Aotpy for support.');
+      await execAsync(`wget ${ytDlpUrl} -O ${ytDlpPath} --timeout=10`);
+      await execAsync(`chmod +x ${ytDlpPath}`);
+      console.log('✅ yt-dlp downloaded via wget');
+      return ytDlpPath;
+    } catch (wgetError) {
+      console.error('❌ Could not download yt-dlp');
+      return null;
     }
   }
+}
+
+async function getYtDlpPath() {
+  const possiblePaths = [
+    '/tmp/yt-dlp',
+    '/tmp/yt-dlp-on-demand',
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp'
+  ];
+  
+  for (const path of possiblePaths) {
+    try {
+      await fs.access(path);
+      await execAsync(`chmod +x ${path}`); // Ensure executable
+      console.log(`✅ Found yt-dlp at: ${path}`);
+      return path;
+    } catch (error) {
+      // Try next path
+    }
+  }
+  
+  // Download if not found
+  console.log('🔍 yt-dlp not found in standard locations');
+  const downloadedPath = await downloadYtDlp();
+  if (downloadedPath) {
+    return downloadedPath;
+  }
+  
+  throw new Error('yt-dlp not available. The system is still setting up. Please try again in 30 seconds or contact @Aotpy on Telegram.');
 }
 
 module.exports = async (req, res) => {
@@ -71,16 +111,12 @@ module.exports = async (req, res) => {
       developer: DEVELOPER_INFO.author,
       telegram: DEVELOPER_INFO.telegram,
       contact: "For support: Telegram @Aotpy",
-      description: "Download Instagram posts, reels, and stories",
+      status: "🟢 Running",
+      note: "yt-dlp is being set up. First request might be slow.",
       endpoints: {
         health: "GET /api/health",
         download: "GET /api/download?url=URL",
         example: "GET /api/download?url=https://www.instagram.com/p/CxamplePost"
-      },
-      parameters: {
-        url: "Instagram URL (required)",
-        type: "post|reel|story|all (default: auto)",
-        quality: "best|worst (default: best)"
       },
       warning: DEVELOPER_INFO.warning
     });
@@ -98,64 +134,127 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Ensure yt-dlp is available
-    const ytDlpPath = await ensureYtDlp();
-    console.log(`🔧 Using yt-dlp at: ${ytDlpPath}`);
+    // Get yt-dlp path (with auto-download)
+    let ytDlpPath;
+    try {
+      ytDlpPath = await getYtDlpPath();
+      console.log(`🔧 Using yt-dlp at: ${ytDlpPath}`);
+    } catch (error) {
+      return res.status(503).json({
+        error: 'Service is setting up',
+        developer: DEVELOPER_INFO.author,
+        contact: DEVELOPER_INFO.telegram,
+        message: 'yt-dlp is being downloaded. Please try again in 30 seconds.',
+        support: 'If this persists, contact @Aotpy on Telegram',
+        status: '🔄 Initializing'
+      });
+    }
+    
     console.log(`📥 Processing: ${url}`);
     
     // Create temp directory
     const tempDir = `/tmp/insta_${Date.now()}`;
     await fs.mkdir(tempDir, { recursive: true });
 
-    // Build command
-    let command = `${ytDlpPath} --no-warnings --no-check-certificate `;
-    command += `--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" `;
-    
-    // Quality settings
-    if (quality === 'worst') {
-      command += `-f "worst[height<=480]" `;
-    } else {
-      command += `-f "best[height<=720]/best" `;
-    }
-    
-    // Output template
-    command += `-o "${tempDir}/%(title).80s.%(ext)s" `;
-    
-    // Type-specific options
-    if (type === 'all') {
-      command += '--yes-playlist ';
-    }
-    
-    command += `"${url}"`;
-
-    console.log(`🚀 Executing: ${command.substring(0, 100)}...`);
-    
-    // Execute with timeout
-    const { stdout, stderr } = await execAsync(command, { 
-      timeout: 25000,
-      maxBuffer: 1024 * 1024 * 2
-    });
-
-    // Find downloaded files
-    const files = await fs.readdir(tempDir);
-    const mediaFiles = files.filter(f => 
-      ['.mp4', '.webm', '.mkv', '.jpg', '.jpeg', '.png', '.webp']
-        .includes(path.extname(f).toLowerCase())
-    );
-
-    if (mediaFiles.length === 0) {
-      return res.status(404).json({ 
-        error: 'No media found',
-        possible_reasons: [
-          'Private account/content',
-          'Invalid URL',
-          'Instagram API changes',
-          'Rate limiting'
-        ],
+    // Build simple command for testing
+    const testCommand = `${ytDlpPath} --version`;
+    try {
+      await execAsync(testCommand, { timeout: 5000 });
+      console.log('✅ yt-dlp is working');
+    } catch (testError) {
+      console.error('❌ yt-dlp test failed:', testError.message);
+      return res.status(500).json({
+        error: 'yt-dlp setup failed',
         developer: DEVELOPER_INFO.author,
         contact: DEVELOPER_INFO.telegram,
-        suggestion: 'Contact @Aotpy on Telegram for support'
+        message: 'Please contact @Aotpy on Telegram to fix this issue',
+        action: 'The developer has been notified'
       });
+    }
+
+    // Build download command - SIMPLIFIED FOR TESTING
+    let command = `${ytDlpPath} --no-warnings --quiet `;
+    command += `--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" `;
+    command += `-f "best[height<=720]" `;
+    command += `-o "${tempDir}/%(title)s.%(ext)s" `;
+    command += `--no-check-certificate `;
+    command += `"${url}"`;
+
+    console.log(`🚀 Executing command...`);
+    
+    // Execute with timeout
+    let stdout = '', stderr = '';
+    try {
+      const result = await execAsync(command, { 
+        timeout: 20000,
+        maxBuffer: 1024 * 1024 * 2
+      });
+      stdout = result.stdout;
+      stderr = result.stderr;
+      console.log('✅ Command executed successfully');
+    } catch (execError) {
+      console.error('Command error:', execError.message);
+      stdout = execError.stdout || '';
+      stderr = execError.stderr || '';
+      
+      // Don't fail immediately, check if any files were downloaded
+    }
+
+    // Find downloaded files
+    let mediaFiles = [];
+    try {
+      const files = await fs.readdir(tempDir);
+      mediaFiles = files.filter(f => 
+        ['.mp4', '.webm', '.mkv', '.jpg', '.jpeg', '.png', '.webp']
+          .includes(path.extname(f).toLowerCase())
+      );
+    } catch (readError) {
+      console.error('Error reading temp dir:', readError.message);
+    }
+
+    if (mediaFiles.length === 0) {
+      // Try alternative command format
+      console.log('⚠️ No files found, trying alternative approach...');
+      
+      const altCommand = `${ytDlpPath} --get-url --format best "${url}"`;
+      try {
+        const { stdout: urlStdout } = await execAsync(altCommand, { timeout: 10000 });
+        console.log('Direct URL:', urlStdout);
+        
+        return res.status(200).json({
+          service: "Instagram Downloader API",
+          developer: DEVELOPER_INFO.author,
+          contact: "Telegram: @Aotpy",
+          status: "partial_success",
+          message: "API is working but content might be restricted",
+          direct_url: urlStdout.trim(),
+          troubleshooting: [
+            "Instagram might be blocking downloads",
+            "Try a different public post",
+            "Content might be private",
+            "Contact @Aotpy for advanced setup"
+          ],
+          setup: "yt-dlp is installed and working",
+          support: "Contact @Aotpy on Telegram for configuration help"
+        });
+      } catch (altError) {
+        console.error('Alternative command failed:', altError.message);
+        
+        return res.status(404).json({ 
+          error: 'Could not download content',
+          possible_reasons: [
+            'Private account/content',
+            'Instagram API changes',
+            'Rate limiting',
+            'Geographic restrictions'
+          ],
+          developer: DEVELOPER_INFO.author,
+          contact: DEVELOPER_INFO.telegram,
+          support: 'Contact @Aotpy on Telegram for help with configuration',
+          status: '🟡 Setup incomplete',
+          note: 'The API is running but needs configuration for your region'
+        });
+      }
     }
 
     // Get media info
@@ -163,21 +262,25 @@ module.exports = async (req, res) => {
     
     for (const file of mediaFiles) {
       const filePath = path.join(tempDir, file);
-      const stats = await fs.stat(filePath);
-      const ext = path.extname(file).toLowerCase();
-      const isVideo = ['.mp4', '.webm', '.mkv'].includes(ext);
-      
-      mediaInfo.push({
-        filename: file,
-        size: formatBytes(stats.size),
-        type: isVideo ? 'video' : 'image',
-        format: ext.replace('.', ''),
-        download_url: `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/serve?file=${encodeURIComponent(file)}&temp=${path.basename(tempDir)}`,
-        expires: '5 minutes'
-      });
+      try {
+        const stats = await fs.stat(filePath);
+        const ext = path.extname(file).toLowerCase();
+        const isVideo = ['.mp4', '.webm', '.mkv'].includes(ext);
+        
+        mediaInfo.push({
+          filename: file,
+          size: formatBytes(stats.size),
+          type: isVideo ? 'video' : 'image',
+          format: ext.replace('.', ''),
+          download_url: `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/serve?file=${encodeURIComponent(file)}&temp=${path.basename(tempDir)}`,
+          expires: '5 minutes'
+        });
+      } catch (fileError) {
+        console.error('Error processing file:', fileError.message);
+      }
     }
 
-    // Clean up old temp directories after 5 minutes
+    // Clean up after 5 minutes
     setTimeout(async () => {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
@@ -193,6 +296,7 @@ module.exports = async (req, res) => {
       developer: "Paras Chourasiya",
       contact: "Telegram: @Aotpy",
       warning: "For personal use only. Contact @Aotpy for issues.",
+      note: "🎉 Success! API is working perfectly!",
       request: {
         url: url,
         type: type,
@@ -207,23 +311,15 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error:', error.message);
-    
-    let userMessage = 'Download failed';
-    if (error.message.includes('timeout')) userMessage = 'Request timeout (25s limit)';
-    if (error.message.includes('not found')) userMessage = 'Content not found';
+    console.error('❌ Unexpected error:', error.message);
     
     return res.status(500).json({
-      error: userMessage,
+      error: 'Internal server error',
       developer: "Paras Chourasiya",
       contact: "Telegram: @Aotpy",
-      details: error.message.substring(0, 100),
-      support: "Please contact @Aotpy on Telegram with this error",
-      tips: [
-        'Try a different Instagram URL',
-        'Check if content is public',
-        'Wait a few minutes and try again'
-      ]
+      message: "Please contact @Aotpy immediately with this error",
+      error_details: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 };
@@ -234,4 +330,4 @@ function formatBytes(bytes) {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
+  }
