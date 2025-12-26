@@ -5,7 +5,28 @@
     }
   },
   "rewrites": [
+    { "source": "/", "destination": "/api/health" },
     { "source": "/api/download", "destination": "/api/download.js" },
-    { "source": "/api/health", "destination": "/api/health.js" }
+    { "source": "/api/health", "destination": "/api/health.js" },
+    { "source": "/api/serve", "destination": "/api/serve.js" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Developer",
+          "value": "Paras Chourasiya"
+        },
+        {
+          "key": "X-Contact",
+          "value": "Telegram: @Aotpy"
+        },
+        {
+          "key": "X-Warning",
+          "value": "For personal use only. Contact @Aotpy for issues."
+        }
+      ]
+    }
   ]
 }
