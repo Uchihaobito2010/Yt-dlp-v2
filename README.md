@@ -19,7 +19,7 @@
 ### 1. Clone & Deploy
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/instagram-dl-api.git
+git clone https://github.com/Uchihaobito2010/yt-dlp-v2.git
 cd instagram-dl-api
 
 # Install dependencies
