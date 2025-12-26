@@ -4,14 +4,15 @@
   "description": "Instagram media downloader API by Paras Chourasiya (TG: @Aotpy)",
   "main": "index.js",
   "scripts": {
-    "start": "node api/download.js"
+    "start": "node api/download.js",
+    "postinstall": "node scripts/setup-ytdlp.js"
   },
   "dependencies": {
     "@vercel/node": "^4.0.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "yt-dlp-exec": "^1.2.0"
+    "fs-extra": "^11.1.1"
   },
   "engines": {
     "node": "24.x"
@@ -20,6 +21,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/instagram-dl-api"
+    "url": "https://github.com/Uchihaobito2010/Yt-dlp-v2"
   }
 }
