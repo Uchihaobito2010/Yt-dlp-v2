@@ -13,11 +13,30 @@ const DEVELOPER_INFO = {
   note: "Do not download content you don't own or have permission for."
 };
 
+// Ensure yt-dlp is available
+const YT_DLP_PATH = '/tmp/yt-dlp';
+
+async function ensureYtDlp() {
+  try {
+    await fs.access(YT_DLP_PATH);
+    return YT_DLP_PATH;
+  } catch {
+    // Fallback to system yt-dlp
+    try {
+      await execAsync('which yt-dlp');
+      return 'yt-dlp';
+    } catch {
+      throw new Error('yt-dlp not found. Contact @Aotpy for support.');
+    }
+  }
+}
+
 module.exports = async (req, res) => {
   // Add developer headers
   res.setHeader('X-Developer', DEVELOPER_INFO.author);
   res.setHeader('X-Contact', DEVELOPER_INFO.telegram);
   res.setHeader('X-Warning', DEVELOPER_INFO.warning);
+  res.setHeader('X-Service', 'Instagram Downloader by Paras Chourasiya (@Aotpy)');
   
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -28,190 +47,191 @@ module.exports = async (req, res) => {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  // Handle preflight requests
+  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Only allow GET requests
+  // Only allow GET
   if (req.method !== 'GET') {
     return res.status(405).json({ 
       error: 'Method not allowed. Use GET with URL parameter.',
       developer: DEVELOPER_INFO.author,
       contact: DEVELOPER_INFO.telegram,
-      usage: 'GET /api/download?url=INSTAGRAM_URL'
+      example: 'GET /api/download?url=https://www.instagram.com/p/CxamplePost'
     });
   }
 
   const { url, type = 'auto', quality = 'best' } = req.query;
 
-  // Show welcome message if no URL
+  // Show welcome if no URL
   if (!url) {
-    return res.status(400).json({
+    return res.status(200).json({
       service: "Instagram Media Downloader API",
       developer: DEVELOPER_INFO.author,
       telegram: DEVELOPER_INFO.telegram,
-      error: 'Instagram URL is required',
-      usage: '/api/download?url=INSTAGRAM_URL&type=post|reel|story|all&quality=best|worst',
-      example: '/api/download?url=https://www.instagram.com/p/Cxample&type=reel',
-      warning: DEVELOPER_INFO.warning,
-      contact: DEVELOPER_INFO.contact,
+      contact: "For support: Telegram @Aotpy",
+      description: "Download Instagram posts, reels, and stories",
       endpoints: {
-        health_check: '/api/health',
-        download: '/api/download?url=URL'
-      }
+        health: "GET /api/health",
+        download: "GET /api/download?url=URL",
+        example: "GET /api/download?url=https://www.instagram.com/p/CxamplePost"
+      },
+      parameters: {
+        url: "Instagram URL (required)",
+        type: "post|reel|story|all (default: auto)",
+        quality: "best|worst (default: best)"
+      },
+      warning: DEVELOPER_INFO.warning
     });
   }
 
   try {
-    // Validate Instagram URL
+    // Validate URL
     if (!url.includes('instagram.com')) {
       return res.status(400).json({ 
         error: 'Invalid Instagram URL',
         developer: DEVELOPER_INFO.author,
         contact: DEVELOPER_INFO.telegram,
-        example: 'https://www.instagram.com/p/CxamplePost'
+        example: 'https://www.instagram.com/p/CxamplePost',
+        suggestion: 'Make sure the URL starts with https://www.instagram.com/'
       });
     }
 
-    console.log(`Processing: ${url}`);
+    // Ensure yt-dlp is available
+    const ytDlpPath = await ensureYtDlp();
+    console.log(`🔧 Using yt-dlp at: ${ytDlpPath}`);
+    console.log(`📥 Processing: ${url}`);
     
     // Create temp directory
     const tempDir = `/tmp/insta_${Date.now()}`;
     await fs.mkdir(tempDir, { recursive: true });
 
-    // Build yt-dlp command with better error handling
-    let command = `yt-dlp --no-warnings --no-check-certificate --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" `;
+    // Build command
+    let command = `${ytDlpPath} --no-warnings --no-check-certificate `;
+    command += `--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" `;
     
-    // Add quality option
+    // Quality settings
     if (quality === 'worst') {
-      command += `-f "worst[height<=720]" `;
+      command += `-f "worst[height<=480]" `;
     } else {
-      command += `-f "best[height<=1080]/best" `;
+      command += `-f "best[height<=720]/best" `;
     }
     
-    // Add output template
-    command += `-o "${tempDir}/%(title).100s-%(id)s.%(ext)s" `;
+    // Output template
+    command += `-o "${tempDir}/%(title).80s.%(ext)s" `;
     
-    // Add additional options based on type
-    switch (type) {
-      case 'reel':
-        command += '--format-sort "res:1080" ';
-        break;
-      case 'story':
-        command += '--download-archive archive.txt ';
-        break;
-      case 'all':
-        command += '--yes-playlist ';
-        break;
+    // Type-specific options
+    if (type === 'all') {
+      command += '--yes-playlist ';
     }
-    
-    // Add cookies file if exists (better for private content)
-    command += `--cookies-from-browser chrome `;
     
     command += `"${url}"`;
 
-    console.log(`Executing: ${command}`);
+    console.log(`🚀 Executing: ${command.substring(0, 100)}...`);
     
-    // Execute yt-dlp with timeout
+    // Execute with timeout
     const { stdout, stderr } = await execAsync(command, { 
-      timeout: 25000, // 25 seconds timeout
-      maxBuffer: 1024 * 1024 * 5 // 5MB buffer
+      timeout: 25000,
+      maxBuffer: 1024 * 1024 * 2
     });
-
-    console.log('yt-dlp output:', stdout);
-    if (stderr) console.error('yt-dlp errors:', stderr);
 
     // Find downloaded files
     const files = await fs.readdir(tempDir);
-    const videoFiles = files.filter(f => 
-      ['.mp4', '.webm', '.mkv', '.mov'].includes(path.extname(f).toLowerCase())
-    );
-    const imageFiles = files.filter(f => 
-      ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())
+    const mediaFiles = files.filter(f => 
+      ['.mp4', '.webm', '.mkv', '.jpg', '.jpeg', '.png', '.webp']
+        .includes(path.extname(f).toLowerCase())
     );
 
-    if (videoFiles.length === 0 && imageFiles.length === 0) {
+    if (mediaFiles.length === 0) {
       return res.status(404).json({ 
-        error: 'No media found or content might be private',
-        suggestion: 'Try using cookies or check if the content is public',
+        error: 'No media found',
+        possible_reasons: [
+          'Private account/content',
+          'Invalid URL',
+          'Instagram API changes',
+          'Rate limiting'
+        ],
         developer: DEVELOPER_INFO.author,
         contact: DEVELOPER_INFO.telegram,
-        stdout: stdout.substring(0, 500),
-        stderr: stderr?.substring(0, 500) || 'No error output'
+        suggestion: 'Contact @Aotpy on Telegram for support'
       });
     }
 
     // Get media info
     const mediaInfo = [];
     
-    for (const file of [...videoFiles, ...imageFiles]) {
+    for (const file of mediaFiles) {
       const filePath = path.join(tempDir, file);
       const stats = await fs.stat(filePath);
-      const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-      
-      // Check if file is within Vercel limits (50MB)
-      if (stats.size > 50 * 1024 * 1024) {
-        console.warn(`File ${file} exceeds 50MB limit: ${fileSizeMB}MB`);
-      }
+      const ext = path.extname(file).toLowerCase();
+      const isVideo = ['.mp4', '.webm', '.mkv'].includes(ext);
       
       mediaInfo.push({
         filename: file,
-        size: `${fileSizeMB} MB`,
-        bytes: stats.size,
-        type: videoFiles.includes(file) ? 'video' : 'image',
-        download_url: `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/serve?path=${encodeURIComponent(filePath)}&name=${encodeURIComponent(file)}`,
-        expires_in: "5 minutes (temporary storage)"
+        size: formatBytes(stats.size),
+        type: isVideo ? 'video' : 'image',
+        format: ext.replace('.', ''),
+        download_url: `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/serve?file=${encodeURIComponent(file)}&temp=${path.basename(tempDir)}`,
+        expires: '5 minutes'
       });
     }
 
-    // Return media info
+    // Clean up old temp directories after 5 minutes
+    setTimeout(async () => {
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+        console.log(`🧹 Cleaned up: ${tempDir}`);
+      } catch (e) {
+        console.error('Cleanup error:', e.message);
+      }
+    }, 5 * 60 * 1000);
+
     return res.status(200).json({
       success: true,
-      service: "Instagram Media Downloader API",
-      developer: DEVELOPER_INFO.author,
-      contact: DEVELOPER_INFO.contact,
-      warning: DEVELOPER_INFO.warning,
-      original_url: url,
-      media_type: type,
-      quality: quality,
-      media_count: mediaInfo.length,
-      media: mediaInfo,
-      instructions: "Use the download_url to download each file. Links expire in 5 minutes.",
-      note: "For issues or questions, contact on Telegram: @Aotpy"
+      service: "Instagram Downloader API",
+      developer: "Paras Chourasiya",
+      contact: "Telegram: @Aotpy",
+      warning: "For personal use only. Contact @Aotpy for issues.",
+      request: {
+        url: url,
+        type: type,
+        quality: quality
+      },
+      result: {
+        count: mediaInfo.length,
+        files: mediaInfo
+      },
+      instructions: "Use download_url to get the file. Links expire in 5 minutes.",
+      support: "Problems? Contact @Aotpy on Telegram"
     });
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('❌ Error:', error.message);
     
-    // Different error messages based on error type
-    let errorMessage = 'Download failed';
-    let suggestions = [];
-    
-    if (error.code === 'ETIMEDOUT' || error.killed) {
-      errorMessage = 'Download timeout';
-      suggestions = [
-        'Try again with a smaller video',
-        'The Instagram server might be slow',
-        'Try different quality setting'
-      ];
-    } else if (error.message.includes('Command failed')) {
-      errorMessage = 'Download command failed';
-      suggestions = [
-        'Check if the Instagram URL is valid',
-        'Content might be private or removed',
-        'Try a different Instagram post'
-      ];
-    }
+    let userMessage = 'Download failed';
+    if (error.message.includes('timeout')) userMessage = 'Request timeout (25s limit)';
+    if (error.message.includes('not found')) userMessage = 'Content not found';
     
     return res.status(500).json({
-      error: errorMessage,
-      service: "Instagram Media Downloader API",
-      developer: DEVELOPER_INFO.author,
-      contact: "For immediate assistance, contact on Telegram: @Aotpy",
-      suggestions: suggestions,
-      details: error.message.substring(0, 200),
-      help: "Check /api/health for API status and usage instructions"
+      error: userMessage,
+      developer: "Paras Chourasiya",
+      contact: "Telegram: @Aotpy",
+      details: error.message.substring(0, 100),
+      support: "Please contact @Aotpy on Telegram with this error",
+      tips: [
+        'Try a different Instagram URL',
+        'Check if content is public',
+        'Wait a few minutes and try again'
+      ]
     });
   }
 };
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
